@@ -476,7 +476,9 @@ player. The grid lines are the lines $x=k$ and $y=k$ for whole numbers $k$ (the 
 $\vec p,\,\vec r$. The ray crosses a vertical grid line $x=k$ when $p_x+t\,r_x=k$, i.e. at $t=\dfrac{k-p_x}{r_x}$. Consecutive
 vertical lines are hit at parameters that differ by
 
-$$\Delta t_x=\frac1{|r_x|},\qquad \Delta t_y=\frac1{|r_y|}\qquad(\text{`delta_dist_x`, `delta_dist_y`}).$$
+$$\Delta t_x=\frac1{|r_x|},\qquad \Delta t_y=\frac1{|r_y|}.$$
+
+In the code these two numbers are `delta_dist_x` and `delta_dist_y`.
 
 ($\Delta$ means "the gap between two neighbours"; $|r_x|$ is $r_x$ without its minus sign.) Geometrically: moving by
 $\Delta t_x\,\vec r$ changes $x$ by exactly 1. The crossings of the vertical lines form an *arithmetic sequence* in $t$ (numbers

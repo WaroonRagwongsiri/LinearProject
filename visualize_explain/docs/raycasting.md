@@ -19,7 +19,7 @@ cross-checked against the compiled C functions, so the numbers in the GIFs are t
 |---|---|
 | [Notation](#notation-and-terms-reference) | every symbol, notation and term, in one place |
 | [0](#0-the-problem-computers-back-then-were-tiny) | Why the obvious way is too slow, and what we can do: which linear algebra fixes which problem |
-| [1](#1-the-naive-angle-method-and-why-it-loses) | Angles, `cos`/`sin`, tiny steps, fisheye |
+| [1](#1-angles-per-column-and-what-still-goes-wrong) | One angle per column, and what still goes wrong: missed walls, fisheye |
 | [2](#2-the-camera-is-a-matrix) | Camera = 2×2 matrix; rotation = left-multiplication; ray = matrix·vector |
 | [3](#3-dda-walking-the-grid) | Ray = line; DDA merges two arithmetic sequences |
 | [4](#4-perpendicular-distance-is-a-dot-product) | Why `wall_dist` needs no `cos` |
@@ -169,8 +169,8 @@ plus one `sin`/`cos` pair per line. These numbers have fractions (3.7, 4.25), wh
 
 ### 0.2 What can we do?
 
-Four things made the obvious way slow: **too many lines**, **`sin` and `cos` for every line**, **too many tiny steps along
-each line**, and **bent walls that need a fix-up**. Each one can be attacked, and the tool that does it is mostly
+Three things made the obvious way slow: **too many lines**, **`sin` and `cos` for every line**, and **too many tiny steps along
+each line**. Each one can be attacked, and the tool that does it is mostly
 **linear algebra**: vectors, one small matrix and the dot product. Here is each problem, what we can do, which linear
 algebra helps, and the section that explains it.
 
@@ -201,7 +201,7 @@ algebra helps, and the section that explains it.
 - *Linear algebra:* because the map is 2D, everything lives in the plane, so a point is a pair of numbers and a direction is a
   2-vector. A column becomes **one number** $c$ between $-1$ and $1$, and its line is the vector $\vec r=\vec d+c\,\vec P$, a
   combination of two vectors: the direction the player faces and the camera plane.
-- *Explained in:* [§1](#1-the-naive-angle-method-and-why-it-loses) (one line per column, the angle way and its problems),
+- *Explained in:* [§1](#1-angles-per-column-and-what-still-goes-wrong) (one angle per column),
   [§2.1–2.2](#21-two-vectors-define-the-camera).
 
 **2. `sin` and `cos` for every line**
@@ -223,20 +223,12 @@ algebra helps, and the section that explains it.
   of numbers that we merge in order.
 - *Explained in:* [§3](#3-dda-walking-the-grid).
 
-**4. Bent walls (fisheye) and the fix-up**
-
-- *What we can do:* measure the distance **straight ahead** instead of along the slanted line, and get the wall's height from it
-  with one division. (Using the slanted distance makes straight walls look bent, and undoing that would cost another `cos`.)
-- *Linear algebra:* the **dot product**. Because $\vec d\cdot\vec P=0$ and $\lvert\vec d\rvert=1$, we get $\vec d\cdot\vec r=1$ for
-  every column, so the ray parameter $t$ already *is* the straight-ahead distance: no `cos`. The height then follows from
-  similar triangles, $\text{lh}=H/z$.
-- *Explained in:* [§4](#4-perpendicular-distance-is-a-dot-product), [§5](#5-projection-to-a-column).
-
-The same tools finish the picture: the hit point $\vec p+t\,\vec r$ gives the texture column
+The same tools finish the picture: the distance to the wall is a dot product ([§4](#4-perpendicular-distance-is-a-dot-product)),
+the wall's height on screen follows from it ([§5](#5-projection-to-a-column)), the hit point $\vec p+t\,\vec r$ gives the texture column
 ([§6](#6-texture-mapping)), the column is drawn ([§7](#7-drawing-a-column)), moving the player is a combination of the basis
 vectors $\vec d$ and $J\vec d$ ([§8](#8-the-player)), and [§9](#9-one-frame-end-to-end) puts the whole frame together.
 
-Together the four fixes bring one picture to about **8.5 ms** on the same 386, inside the 14 ms allowed.
+Together the three fixes bring one picture to about **8.5 ms** on the same 386, inside the 14 ms allowed.
 
 <details>
 <summary>How these numbers were estimated (assumptions and sources)</summary>
@@ -270,33 +262,32 @@ Lode Vandevenne's [Raycasting tutorial](https://lodev.org/cgtutor/raycasting.htm
 
 ---
 
-## 1. The naive angle method and why it loses
+## 1. Angles per column, and what still goes wrong
 
-The obvious approach: give each column an angle and walk along it.
+With one ray per column ([§0.2](#02-what-can-we-do)), the angle way gives each column its own angle and walks along it exactly as in
+[§0.1](#01-the-obvious-way):
 
 $$\theta_i=\theta_p+\Big(\tfrac{i}{W}-\tfrac12\Big)\text{FOV},\qquad
 \vec p_k=\vec p+k\,\varepsilon\begin{bmatrix}\cos\theta_i\\ \sin\theta_i\end{bmatrix},\quad k=1,2,\dots$$
 
-stop at the first $\vec p_k$ inside a wall cell. Here $\theta_p$ is the direction the player faces, FOV (field of view) is the total angle the player sees, $W$ is the screen width in pixels and $i$ is the column number, so the columns share the field of view equally, one angle per column. $\theta_i$ is the angle of column $i$.
+stop at the first $\vec p_k$ inside a wall cell. Here $\theta_p$ is the direction the player faces, FOV (field of view) is the total angle the player sees, $W$ is the screen width in pixels and $i$ is the column number, so the columns share the field of view equally, one angle per column. $\theta_i$ is the angle of column $i$. (The steps are numbered $k$ here because $i$ numbers the screen columns.)
 
-(This is the formula from [§0.1](#01-the-obvious-way). Here the steps are numbered $k$ because $i$ numbers the screen columns.)
+The cost of this way (a `sin`/`cos` pair per ray and many tiny steps) was counted in §0.1. Two other problems remain:
 
-![Naive marching](../media/NaiveMarching.gif)
-
-Three problems:
-
-1. **Cost.** A ray of length $d$ (the straight-line, or *Euclidean*, distance it has to walk) needs $N=\lceil d/\varepsilon\rceil$ steps, each with a multiply-add and a cell
-   lookup. Smaller $\varepsilon$ is more accurate and proportionally slower. Two trig calls ($\cos\theta_i$,
-   $\sin\theta_i$) per ray, every frame (counted in [§0.1](#01-the-obvious-way)).
-2. **Missed walls.** With a large $\varepsilon$ a ray can step over a thin wall or slip through a corner.
-3. **Fisheye.** The walk measures the *Euclidean* distance $d$. The height of a wall on screen should depend on the
+1. **Missed walls.** With a large $\varepsilon$ a ray can step over a thin wall or slip through a corner.
+2. **Fisheye.** The walk measures the *Euclidean* distance $d$ (the straight-line distance along the ray). The height of a wall on screen should depend on the
    *perpendicular* distance $D$, how far the wall is straight ahead. A flat wall at perpendicular distance $D$ is seen
    at angle $\theta$ from the view direction with $d=D/\cos\theta$, so its edges look farther and the wall bows. Undoing it needs
    $D=d\cos\theta$: one more trig call per ray.
 
 ![Fisheye](../media/FisheyeCompare.gif)
 
-The fix for all three is to stop thinking in angles and use **vectors**: a ray is a line, a line crosses a square
+In the picture, the green line is the perpendicular distance $D$ (straight ahead, the same for the whole flat wall). The blue slanted line is the
+Euclidean distance $d$ along a ray, and $\theta$ (yellow) is the angle between them. As the ray turns toward the edge of the view, $\theta$ grows and
+$d=D/\cos\theta$ grows with it, even though the wall is flat, so a wall height computed from $d$ shrinks at the edges. The red line is the **camera plane**
+with its vectors $\vec d$ (green) and $\vec P$ that we use from [§2](#2-the-camera-is-a-matrix) on.
+
+The fix for all of these is to stop thinking in angles and use **vectors**: a ray is a line, a line crosses a square
 grid at predictable places, and the "angle" never has to be computed.
 
 ---

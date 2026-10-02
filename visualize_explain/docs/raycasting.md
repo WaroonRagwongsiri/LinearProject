@@ -17,7 +17,8 @@ cross-checked against the compiled C functions, so the numbers in the GIFs are t
 
 | Section | Idea |
 |---|---|
-| [0](#0-the-problem-computers-back-then-were-tiny) | Why: tiny 1992 computers, slow decimal maths, and the four moves that fix it |
+| [Notation](#notation-and-terms-reference) | every symbol, notation and term, in one place |
+| [0](#0-the-problem-computers-back-then-were-tiny) | Why the obvious way is too slow, and what we can do: which linear algebra fixes which problem |
 | [1](#1-the-naive-angle-method-and-why-it-loses) | Angles, `cos`/`sin`, tiny steps, fisheye |
 | [2](#2-the-camera-is-a-matrix) | Camera = 2×2 matrix; rotation = left-multiplication; ray = matrix·vector |
 | [3](#3-dda-walking-the-grid) | Ray = line; DDA merges two arithmetic sequences |
@@ -27,7 +28,6 @@ cross-checked against the compiled C functions, so the numbers in the GIFs are t
 | [7](#7-drawing-a-column) | Framebuffer, shading |
 | [8](#8-the-player) | Movement as basis vectors, collision |
 | [9](#9-one-frame-end-to-end) | The whole pipeline |
-| [Notation](#notation-and-terms-reference) | every symbol, notation and term, in one place |
 
 ---
 
@@ -102,7 +102,7 @@ Each symbol and term is also explained where it first appears. This is the place
 | term | meaning |
 |---|---|
 | pixel, column | a pixel is one dot of the screen. A column is one vertical line of pixels, one pixel wide |
-| cell, grid, map | the world is a grid of square cells, each $1\times1$. A cell is a wall or empty. `grid[y][x]` is row $y$, column $x$. Distances are in cells |
+| cell, grid, map | the world is a flat 2D grid of square cells, each $1\times1$. A cell is `1` (wall) or `0` (empty); a letter `N`/`S`/`E`/`W` marks the player's start; a space counts as wall. All walls have the same height. `grid[y][x]` is row $y$, column $x$. Distances are in cells |
 | ray | a line that starts at the player and goes on forever in one direction. The raycaster sends one per screen column |
 | raycasting | building the picture by sending rays and seeing where each one hits a wall |
 | unit vector | a vector of length 1 |
@@ -132,189 +132,139 @@ Each symbol and term is also explained where it first appears. This is the place
 
 ## 0. The problem: computers back then were tiny
 
-Raycasting was not invented because it is elegant. It was invented because the obvious way of drawing a 3D room
-did not fit inside the computers of 1992. This section first shows the obvious way, then how small those computers
-were and how bad decimal numbers were for them, and finally adds it all up. After that come the four moves that
-solve it. The rest of the document is those four moves, one at a time.
+Raycasting exists because the obvious way of drawing a 3D room was far too slow for the computers of 1992. This
+section shows the obvious way, why it was too slow, and what we can do about it, with the linear algebra that helps. The rest
+of the document explains each part in turn.
 
-### 0.1 The obvious way to draw a 3D room
+### 0.1 The obvious way
 
-*Wolfenstein 3D* (1992) drew into a $320\times200$ screen: 320 columns of 200 pixels, which is $64{,}000$ pixels. The
-world is a map made of square **cells**, each $1\times1$, and every cell is either a wall or empty. All distances are
-measured in cells. The obvious way to fill the screen is to ask every pixel "what wall do you see?":
+*Wolfenstein 3D* (1992) drew into a $320\times200$ screen, which is $64{,}000$ pixels. The world is a space with walls in it,
+and the player looks at it. Distances are measured in **cells**: one cell is the width of one wall. The obvious way to
+draw it is to give **every pixel its own ray**: ask each pixel "what wall do you see?":
 
-1. **Point a line** from the player through that pixel. The line has an *angle*, which I call $\theta$ (theta).
-2. **Turn the angle into a step.** One small step forward is $0.1\cos\theta$ across and $0.1\sin\theta$ down, so the
-   angle goes through `sin` and `cos` once per line. (`cos` and `sin` are the standard functions that turn an angle into
-   an "across" and a "down" amount; the picture below shows how.)
-3. **Walk.** Move the point by one step (add to its x, add to its y), then ask: *is the point inside a wall cell?* If
-   not, step again. To find the cell a point $(x,y)$ is in, round both numbers **down** (written $\lfloor x\rfloor$:
-   $\lfloor 2.87\rfloor=2$).
-4. **Hit.** The distance walked tells how tall the wall looks, and that decides the colour of the pixel.
+1. Point a line (a *ray*) from the player through that pixel, at some angle $\theta$ (theta).
+2. Walk along it in small steps of length $\varepsilon$ (epsilon, say $0.1$ cell). After $i$ steps the point is at
 
-#### Reading the formula
+$$\vec p_i=\vec p+i\,\varepsilon\begin{bmatrix}\cos\theta\\ \sin\theta\end{bmatrix}$$
 
-Steps 2 and 3 are one formula. After $i$ steps the point is at
-
-$$\vec p_i \;=\; \vec p \;+\; i\,\varepsilon\begin{bmatrix}\cos\theta\\ \sin\theta\end{bmatrix}$$
+3. After each step ask: *is this point inside a wall?* The first "yes" is the wall, and its distance decides how the pixel
+   is coloured.
 
 ![The step formula](../media/StepFormula.png)
 
-| symbol | meaning | example used below |
-|---|---|---|
-| $\vec p$ | where the player stands, as (x, y). The arrow marks a **vector**: a pair of numbers | $(2,\ 4)$ |
-| $i$ | how many steps have been taken: 1, 2, 3, … (a counter) | |
-| $\varepsilon$ | length of one step, in cells | $0.1$ |
-| $\theta$ | the angle of this line, measured from the x axis (y grows downward) | $30^\circ$ |
-| $\begin{bmatrix}\cos\theta\\ \sin\theta\end{bmatrix}$ | a **direction of length 1**: how far across and how far down per 1 of walking | $(0.866,\ 0.5)$ |
-| $\vec p_i$ | the point after $i$ steps | |
-
-**Why `cos` and `sin`?** They do one job here: turn an angle into a direction. Draw a line of length 1 at angle $\theta$.
-Its horizontal part is $\cos\theta$ and its vertical part is $\sin\theta$ (the dashed right triangle in the picture). The
-length is exactly 1 because $\cos^2\theta+\sin^2\theta=1$, so multiplying by $\varepsilon$ gives a step that is really
-$\varepsilon$ long.
-
-**Example.** With the numbers in the table, $\varepsilon\cos\theta=0.0866$ and $\varepsilon\sin\theta=0.05$:
-
-| $i$ | $\vec p_i$ = (x, y) | wall cell to test $(\lfloor x\rfloor,\lfloor y\rfloor)$ |
-|---:|---|---|
-| 0 | (2.0000, 4.0000) | (2, 4) |
-| 1 | (2.0866, 4.0500) | (2, 4) |
-| 2 | (2.1732, 4.1000) | (2, 4) |
-| 3 | (2.2598, 4.1500) | (2, 4) |
-| 10 | (2.8660, 4.5000) | (2, 4) |
-
-Each row is the row above plus the same small arrow $(0.0866,\ 0.05)$. That is how the count below works: the arrow is
-computed **once per line** (`sin`, `cos`, and two multiplications by $\varepsilon$), and every step after that is
-**two additions**, $\vec p_i=\vec p_{i-1}+\varepsilon\,(\cos\theta,\sin\theta)$. The step count $N$ is the walking distance divided
-by $\varepsilon$: a wall $5.81$ cells away needs $\lceil 5.81/0.1\rceil=59$ steps. ($\lceil a\rceil$ rounds **up**: $\lceil58.1\rceil=59$.)
+In words: $\vec p$ is where the player stands, $i$ counts the steps, $\varepsilon$ is the length of one step, and
+$(\cos\theta,\ \sin\theta)$ is a direction of length 1 (`cos` and `sin` give its "across" and "down" parts, the dashed
+triangle in the picture). Each step just adds the same small arrow, so it costs two additions, one for $x$ and one for $y$.
 
 ![Naive marching](../media/NaiveMarching.gif)
 
-Count the work. In the demo room a wall is on average **5.8 cells** away, so with steps of 0.1 cell a line takes about
-**59 steps**, and every step is 2 additions (x and y). Positions such as 3.7 or 4.25 are *decimal numbers*, so these
-are decimal additions. For **one picture**:
+Count the work for one picture. In the demo room used for the animations a wall is on average $5.8$ cells away, which is
+$\lceil5.81/0.1\rceil=59$ steps ($\lceil\,\rceil$ rounds **up**). So
 
-| what | how many |
-|---|---:|
-| lines (one per pixel) | 64,000 |
-| `sin` + `cos` (one pair per line) | 64,000 |
-| decimal additions ($64{,}000\times59\times2$) | **7,552,000** |
+$$64{,}000\ \text{lines}\times59\ \text{steps}\times2\ \text{additions}\;\approx\;\mathbf{7.6\ million\ additions},$$
 
-And the game wants a new picture 70 times every second. Is that a lot? That depends on the computer, which is the
-next question.
+plus one `sin`/`cos` pair per line. These numbers have fractions (3.7, 4.25), which a computer stores as
+**floating-point** ("decimal") numbers. The computers of 1992 could not do this fast enough: a 386 would need about
+**6 seconds** for one picture, and the game needed 70 pictures every second, one every 14 ms.
 
-### 0.2 How slow is "slow"?
+### 0.2 What can we do?
 
-The game was made for a **386** PC and had to limp along on a **286** (these are Intel processor models; a 386 is the faster one). It aimed at **70 pictures per second**.
+Four things made the obvious way slow: **too many lines**, **`sin` and `cos` for every line**, **too many tiny steps along
+each line**, and **bent walls that need a fix-up**. Each one can be attacked, and the tool that does it is mostly
+**linear algebra**: vectors, one small matrix and the dot product. Here is each problem, what we can do, which linear
+algebra helps, and the section that explains it.
 
-A processor works in **ticks** (clock ticks, like a heartbeat). A 33 MHz chip has 33 million ticks per second, and
-the simplest instruction (adding two whole numbers) needs 2 of them. Split the ticks over the pixels:
+**1. Too many lines** (64,000 per picture)
 
-| computer | ticks per second | ticks per picture (÷ 70) | ticks per **pixel** (÷ 64,000) |
-|---|---:|---:|---:|
-| 286 at 8 MHz | 8 million | 114,000 | **1.8** |
-| 386 at 33 MHz | 33 million | 471,000 | **7.4** |
+- *What we can do:* **simplify the world on purpose.** In a real 3D world every pixel could see something different, which is why
+  the obvious way needs a ray per pixel. So we restrict the world:
+  - the map is only **2D**: a flat grid of square cells, each $1\times1$, and every cell is `0` (empty floor) or `1` (wall), plus
+    one letter (`N`, `S`, `E` or `W`) that marks where the player starts and which way they face. This is the map from your
+    `maps/sample.cub`:
 
-Your computer has billions of ticks per second. The 386 had **seven ticks for each pixel**, and the 286 fewer than
-two. Just *writing* a colour into a pixel already costs several ticks (4 on a 386), so there was almost nothing left to
-calculate per pixel.
+    ```
+    1111111111
+    1000000001
+    1000N00001
+    1000000001
+    1111111111
+    ```
 
-Now hold that next to the list above. The obvious method needs **7.6 million additions** for one picture, and the
-386 has **471,000 ticks** for the whole picture. Even if every addition took a single tick it would not fit. It is
-worse than that, because these are decimal additions.
+    (To find which cell a point $(x,y)$ is in, round both numbers **down**: $\lfloor2.87\rfloor=2$.)
+  - every wall stands **straight up** and has **exactly the same height**; floor and ceiling are flat colours;
+  - the player only **turns left and right** (no looking up or down) and stays at one height.
 
-### 0.3 Decimal numbers were the worst part
+  Under these rules everything in one screen column comes from **one wall at one distance**, so every pixel in that column
+  shows the same stretch of wall, only stretched to a different height. Cast **one line per column**: 320 lines instead of
+  64,000, which is 200× fewer (6 s becomes about 30 ms). The price: no slopes, stairs, different wall heights or rooms above
+  rooms.
+- *Linear algebra:* because the map is 2D, everything lives in the plane, so a point is a pair of numbers and a direction is a
+  2-vector. A column becomes **one number** $c$ between $-1$ and $1$, and its line is the vector $\vec r=\vec d+c\,\vec P$, a
+  combination of two vectors: the direction the player faces and the camera plane.
+- *Explained in:* [§1](#1-the-naive-angle-method-and-why-it-loses) (one line per column, the angle way and its problems),
+  [§2.1–2.2](#21-two-vectors-define-the-camera).
 
-Ray maths needs fractions such as 3.7, which a computer stores as **floating-point** ("decimal") numbers. Here is
-what one operation cost on a 386 with its maths chip, compared with adding two whole numbers:
+**2. `sin` and `cos` for every line**
 
-| operation | ticks | times slower than a whole-number add |
-|---|---:|---:|
-| add two whole numbers | 2 | 1× |
-| **add** two decimal numbers | 24 | **12×** |
-| **multiply** two decimal numbers | 27 | **13×** |
-| **divide** two decimal numbers | 88 | **44×** |
-| square root | 122 | 61× |
-| **`sin` and `cos`** (together) | 194 | **97×** (up to about 400×) |
+- *What we can do:* describe each line with a **vector** (two numbers) instead of an angle, so no trigonometry is needed per
+  line.
+- *Linear algebra:* put $\vec d$ and $\vec P$ side by side as a **matrix** $M$. Then $\vec r=M\binom{1}{c}$, a matrix times a
+  vector. Turning the player is one **matrix product**, $M\leftarrow R(\alpha)M$, so `sin` and `cos` run once per turn instead of
+  once per line. Going the other way (world point to screen) is the **inverse matrix** $M^{-1}$.
+- *Explained in:* [§2.2](#22-a-screen-column-is-a-coordinate), [§2.3–2.4](#23-the-camera-matrix-is-rotation--scale),
+  [§2.5](#25-raycasting-is-the-inverse-of-perspective-projection).
 
-(These are the *best* published numbers; real ones are often higher.) It was even worse than the table says:
+**3. About 59 tiny steps per line**
 
-- The decimal maths was done by a **separate, optional chip** (the 387). A game could not count on it being there. Without
-  it, every decimal operation was faked in software, which Fabien Sanglard calls "terribly slow".
-- The first thing you think of for a ray is an **angle**, and an angle needs `sin` and `cos`: about 100 times the price
-  of a whole-number add, *for every line*.
+- *What we can do:* a line only matters where it crosses a cell border. **Jump from grid line to grid line** (DDA): about 8
+  jumps instead of 59, and no wall can be skipped.
+- *Linear algebra:* a line is $\vec q(t)=\vec p+t\,\vec r$, a point plus a multiple of a vector. Solving for where it meets the
+  grid lines gives the gap between crossings, $\Delta t_x=1/\lvert r_x\rvert$ (and the same for $y$): two evenly spaced lists
+  of numbers that we merge in order.
+- *Explained in:* [§3](#3-dda-walking-the-grid).
 
-So the engine had to avoid decimal numbers, and avoid `sin`/`cos`, almost entirely.
+**4. Bent walls (fisheye) and the fix-up**
 
-### 0.4 Adding it up: how long does one picture take?
+- *What we can do:* measure the distance **straight ahead** instead of along the slanted line, and get the wall's height from it
+  with one division. (Using the slanted distance makes straight walls look bent, and undoing that would cost another `cos`.)
+- *Linear algebra:* the **dot product**. Because $\vec d\cdot\vec P=0$ and $\lvert\vec d\rvert=1$, we get $\vec d\cdot\vec r=1$ for
+  every column, so the ray parameter $t$ already *is* the straight-ahead distance: no `cos`. The height then follows from
+  similar triangles, $\text{lh}=H/z$.
+- *Explained in:* [§4](#4-perpendicular-distance-is-a-dot-product), [§5](#5-projection-to-a-column).
 
-Price the list from 0.1 with the tick counts from 0.3. Finding a line's direction costs `sin`/`cos` plus scaling, 248 ticks.
+The same tools finish the picture: the hit point $\vec p+t\,\vec r$ gives the texture column
+([§6](#6-texture-mapping)), the column is drawn ([§7](#7-drawing-a-column)), moving the player is a combination of the basis
+vectors $\vec d$ and $J\vec d$ ([§8](#8-the-player)), and [§9](#9-one-frame-end-to-end) puts the whole frame together.
 
-| part of one picture | how many | ticks each | ticks |
-|---|---:|---:|---:|
-| decimal additions | 7,552,000 | 24 | 181,248,000 |
-| direction of each line (`sin`/`cos` and scaling) | 64,000 | 248 | 15,872,000 |
-| **total** | | | **197,120,000** |
-
-The 386 does 33 million ticks per second, so
-
-$$197{,}120{,}000\ \text{ticks}\;\div\;33{,}000{,}000\ \text{ticks per second}\;\approx\;\mathbf{6\ seconds}$$
-
-for **one** picture. The game needs a picture every $1/70$ s $=14$ ms. That is **418 times too slow**. With smaller
-steps (0.01, so that a line cannot skip over a thin wall) it is **55 seconds** per picture. And this is the *best*
-case: it counts only the arithmetic and assumes the maths chip is installed.
-
-### 0.5 The way out: four moves
-
-Each move removes one of the expensive things.
-
-| | move | what it removes | where |
-|---|---|---|---|
-| 1 | **One line per screen column, not per pixel.** Walls are vertical and all the same height, so every pixel in one column shows the same stretch of wall: one line is enough. | 64,000 lines become 320 (**200× fewer**). 6 s becomes about 30 ms. | this section, then [§1](#1-the-naive-angle-method-and-why-it-loses) |
-| 2 | **Describe each line with a vector, not an angle.** Two numbers ("forward" plus a bit of "sideways") give the direction directly. | `sin` and `cos`: no ~200 ticks per line | [§2](#2-the-camera-is-a-matrix) |
-| 3 | **Jump from grid line to grid line (DDA, the "digital differential analyzer": a method for walking along a line cell by cell), instead of tiny steps.** The walls sit on a square grid, so the line only needs to be checked where it crosses the grid. | about 59 checks per line become about 8, and a wall can no longer be skipped | [§3](#3-dda-walking-the-grid) |
-| 4 | **Get the wall's height from its distance with one division,** using the *perpendicular* distance (measured straight ahead, not along the slanted line). | no `cos` to undo the *fisheye* effect (straight walls looking bent); one division per column | [§4](#4-perpendicular-distance-is-a-dot-product), [§5](#5-projection-to-a-column) |
-
-![Time per picture](../media/TimePerPicture.gif)
-
-After the four moves one picture takes about **8.5 ms** on the same 386, inside the 14 ms it is allowed. The
-remaining sections fill in the details: textures ([§6](#6-texture-mapping)), drawing the column
-([§7](#7-drawing-a-column)), moving the player ([§8](#8-the-player)) and the whole frame ([§9](#9-one-frame-end-to-end)).
+Together the four fixes bring one picture to about **8.5 ms** on the same 386, inside the 14 ms allowed.
 
 <details>
 <summary>How these numbers were estimated (assumptions and sources)</summary>
 
-**Names.** `FADD`, `FMUL`, `FDIV` are the maths chip's decimal add, multiply and divide; `FSINCOS` computes `sin` and `cos` together.
+A *tick* is one beat of the processor's clock (a 33 MHz chip has 33 million per second); a whole-number addition takes 2 of them, a
+decimal addition 24, a decimal division 88, and `sin` with `cos` 194. Only the arithmetic is counted, with the *lowest* published tick count of each instruction, so real costs are higher. Ray
+counts (5.81 cells, 59 steps, 7.6 DDA steps) come from the 320 real rays of the demo room run through the Python mirror of
+the C code; the tick prices are my own estimate. `python common/budget.py` prints every number.
 
-**Method.** A ray's cost is counted as the ticks of its arithmetic only, using the *lowest* published tick count of
-each instruction, so the real cost can only be higher. The ray counts (distance to the wall, number of DDA steps,
-wall height) come from the 320 real rays of the demo room run through the Python mirror of the C code. The tick prices
-are my own estimate; `python common/budget.py` prints every number used here.
-
-- **Per pixel / per column, angle marching:** setup = `FSINCOS` 194 + 2 `FMUL` (2×27) = 248 ticks; each step = 2 `FADD`
-  (2×24) = 48 ticks. Mean distance 5.81 cells: 59 steps at 0.1, 582 at 0.01. A true per-pixel ray also moves
-  vertically, adding one more `FADD` per step, which I left out.
-- **This project's version (one line per column, vectors, DDA):** about 878 ticks per column = 380 (set up the ray:
-  4 multiplies, 4 adds, 2 divisions) + 227 (7.6 DDA steps × 30 ticks: one `FADD`, an integer add, a grid lookup)
-  + 112 (distance and wall height: a subtract and a divide) + 158 (draw 39.6 pixels × 4 ticks). Times 320 columns
-  is 281,000 ticks, which is 8.5 ms at 33 MHz (117 pictures per second).
-- **Not a profile of the real game.** I priced *decimal* instructions so the comparison matches this project's C
-  code, which uses `double`. The shipped Wolfenstein 3D used whole-number (fixed-point) maths and its own variant of
-  the algorithm. Read the numbers as "why the obvious method was hopeless", not as a measurement of that game.
-- **Today.** At this project's $1280\times720$ and 60 pictures per second, a 3 GHz core has about 54 ticks per pixel, so
-  per-pixel rays became feasible (GPUs do them). The *ratio* between the methods is unchanged: $720\times$ fewer lines
-  with one per column.
+- **Obvious way:** setup = `FSINCOS` 194 + 2 `FMUL` 54 = 248 ticks per line; each step = 2 `FADD` = 48 ticks
+  (`FADD`/`FMUL`/`FDIV` are the maths chip's decimal add, multiply, divide).
+- **This project, one line per column:** about 878 ticks per column (380 set up the ray, 227 for 7.6 DDA steps, 112 for
+  distance and wall height, 158 to draw 39.6 pixels). Times 320 columns is 281,000 ticks, which is 8.5 ms.
+- **Not a profile of the real game.** I priced *decimal* instructions to match this project's C code (which uses `double`).
+  The shipped game used whole-number (fixed-point) maths and its own variant of the algorithm. Read the numbers as "why the
+  obvious method was hopeless".
+- **Today** (1280×720, 60 pictures per second, a 3 GHz core) there are about 54 ticks per pixel, so per-pixel rays became
+  feasible (GPUs do them). The ratio between the methods is unchanged: 720× fewer lines with one per column.
 
 **Sources.**
-[Wolfenstein 3D (Wikipedia)](https://en.wikipedia.org/wiki/Wolfenstein_3D) (released May 1992; VGA is the standard PC graphics of the time) ·
+[Wolfenstein 3D (Wikipedia)](https://en.wikipedia.org/wiki/Wolfenstein_3D) ·
 [Mode 13h (Wikipedia)](https://en.wikipedia.org/wiki/Mode_13h) (320×200, 64,000 bytes) ·
-[Wolfenstein 3D tech specs](https://www.pixelatedarcade.com/games/wolfenstein-3d/techspecs) ·
+[tech specs](https://www.pixelatedarcade.com/games/wolfenstein-3d/techspecs) ·
 Fabien Sanglard, [*Game Engine Black Book: Wolfenstein 3D*](https://fabiensanglard.net/Game_Engine_Black_Book/index.php)
-(ch. 2.1.1 target CPU, 2.1.3 instruction costs and software-emulated decimals, 2.3.7 the 70 pictures per second) ·
-[Intel i387 datasheet](https://www.ardent-tool.com/CPU/docs/Intel/387/datasheets/271074-006.pdf) (decimal tick counts) ·
-[80x87 Math Coprocessors, Lo-tech wiki](https://www.lo-tech.co.uk/wiki/80x87_Math_Coprocessors) (`FDIV`). For more history see
-Lode Vandevenne's [Raycasting tutorial](https://lodev.org/cgtutor/raycasting.html), the source of the DDA variant used here.
+(ch. 2.1.1 target CPU, 2.1.3 instruction costs, 2.3.7 the 70 pictures per second) ·
+[Intel i387 datasheet](https://www.ardent-tool.com/CPU/docs/Intel/387/datasheets/271074-006.pdf) ·
+[Lo-tech wiki, 80x87](https://www.lo-tech.co.uk/wiki/80x87_Math_Coprocessors) (`FDIV`) ·
+Lode Vandevenne's [Raycasting tutorial](https://lodev.org/cgtutor/raycasting.html) (source of the DDA variant used here).
 
 </details>
 
@@ -329,7 +279,7 @@ $$\theta_i=\theta_p+\Big(\tfrac{i}{W}-\tfrac12\Big)\text{FOV},\qquad
 
 stop at the first $\vec p_k$ inside a wall cell. Here $\theta_p$ is the direction the player faces, FOV (field of view) is the total angle the player sees, $W$ is the screen width in pixels and $i$ is the column number, so the columns share the field of view equally, one angle per column. $\theta_i$ is the angle of column $i$.
 
-(This is the formula from [§0.1](#01-the-obvious-way-to-draw-a-3d-room). Here the steps are numbered $k$ because $i$ numbers the screen columns.)
+(This is the formula from [§0.1](#01-the-obvious-way). Here the steps are numbered $k$ because $i$ numbers the screen columns.)
 
 ![Naive marching](../media/NaiveMarching.gif)
 
@@ -337,7 +287,7 @@ Three problems:
 
 1. **Cost.** A ray of length $d$ (the straight-line, or *Euclidean*, distance it has to walk) needs $N=\lceil d/\varepsilon\rceil$ steps, each with a multiply-add and a cell
    lookup. Smaller $\varepsilon$ is more accurate and proportionally slower. Two trig calls ($\cos\theta_i$,
-   $\sin\theta_i$) per ray, every frame (priced in [§0.4](#04-adding-it-up-how-long-does-one-picture-take)).
+   $\sin\theta_i$) per ray, every frame (counted in [§0.1](#01-the-obvious-way)).
 2. **Missed walls.** With a large $\varepsilon$ a ray can step over a thin wall or slip through a corner.
 3. **Fisheye.** The walk measures the *Euclidean* distance $d$. The height of a wall on screen should depend on the
    *perpendicular* distance $D$, how far the wall is straight ahead. A flat wall at perpendicular distance $D$ is seen
